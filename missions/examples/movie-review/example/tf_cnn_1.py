@@ -27,10 +27,11 @@ import numpy as np
 from torch.utils.data import DataLoader
 
 import nsml
-
+# import dataset_split
+# import kor_char_parser_with_masking
 from dataset_split import MovieReviewDataset, preprocess
 from nsml import DATASET_PATH, HAS_DATASET, GPU_NUM, IS_ON_NSML
-from kor_char_parser_with_masking import get_voca_num
+from kor_char_parser_with_masking import get_voca_num, masking
 import tensorflow as tf
 
 def bind_model(sess, config):
@@ -57,7 +58,7 @@ def bind_model(sess, config):
         """
         :param raw_data: raw input (여기서는 문자열)을 입력받습니다
         :param kwargs:
-        :return:
+        :return:ƒ
         """
 
         # dataset.py에서 작성한 preprocess 함수를 호출하여, 문자열을 벡터로 변환합니다
@@ -91,7 +92,7 @@ def collate_fn(data: list):
     return review, np.array(label)
 
 class TextCNN:
-    def __init__(self, config, vocab_size, clip_gradients=5.0):
+    def __init__(self, config, clip_gradients=5.0):
         """init all hyperparameter here"""
         self.num_classes = 11
         self.batch_size = config.batch
@@ -107,7 +108,7 @@ class TextCNN:
 
 
         self.filter_sizes=[3, 4, 5] # it is a list of int. e.g. [3,4,5]
-        self.num_filters=64
+        self.num_filters=32
         self.num_filters_total=self.num_filters * len(self.filter_sizes) #how many filters totally.
         self.clip_gradients = clip_gradients
 
@@ -258,13 +259,16 @@ if __name__ == '__main__':
 
     # User options
     args.add_argument('--output', type = int, default = 1)
-    args.add_argument('--epochs', type = int, default = 30)
+    args.add_argument('--epochs', type = int, default = 10)
     args.add_argument('--batch', type = int, default = 1600)
     args.add_argument('--strmaxlen', type = int, default = 128)
     args.add_argument('--embedding', type = int, default = 8)
     args.add_argument('--lr', type = float, default = 0.01)
     args.add_argument('--decay_steps', type = int, default = 32)
     args.add_argument('--decay_rate', type = int, default = 0.9)
+    # args.add_argument('--strmaxlen', type = int, default = 8)
+    # args.add_argument('--embedding', type = int, default = 2)
+
     config = args.parse_args()
 
 
@@ -273,10 +277,9 @@ if __name__ == '__main__':
 
     input_size = config.embedding * config.strmaxlen
     output_size = 1
-    dataset_train = MovieReviewDataset(DATASET_PATH, config.strmaxlen)
-    vocab_size = get_voca_num()
 
-    textCNN = TextCNN(config, vocab_size = vocab_size)
+
+    textCNN = TextCNN(config)
 
     sess = tf.InteractiveSession()
     tf.global_variables_initializer().run()
@@ -290,6 +293,9 @@ if __name__ == '__main__':
 
     if config.mode == 'train':
         # 데이터를 로드합니다.
+        dataset_train = MovieReviewDataset(DATASET_PATH, config.strmaxlen)
+        masking(dataset_train.x_test)
+        vocab_size = get_voca_num()
 
         y_test = dataset_train.y_test
         x_test = dataset_train.x_test
@@ -307,26 +313,30 @@ if __name__ == '__main__':
         for epoch in range(config.epochs):
             avg_loss = 0.0
             val_loss = 0.0
+            min_val_loss = 10000
             for i, (data, labels) in enumerate(train_loader):
                 loss, predictions, _ \
                     = sess.run([textCNN.loss_val, textCNN.predictions, textCNN.train_op],
                                feed_dict = {textCNN.input_y:labels, textCNN.input_x:data, textCNN.dropout_keep_prob:0.8})
-
-                print('Batch : ', i + 1, '/', total_batch, ', MSE in this minibatch: ', float(loss))
+                if i % 100 == 0:
+                    val_loss = sess.run(textCNN.loss_val,
+                                        feed_dict = {textCNN.input_y:y_test, textCNN.input_x:x_test,
+                                                     textCNN.dropout_keep_prob:1})
+                    print('Batch : ', i + 1, '/', total_batch, ', MSE in this minibatch: '
+                          , float(loss), 'val_loss : ', val_loss)
 
                 avg_loss += float(loss)
 
             train_loss = float(avg_loss / total_batch)
-            val_loss = sess.run(textCNN.loss_val,
-                                feed_dict = {textCNN.input_y:y_test, textCNN.input_x:x_test, textCNN.dropout_keep_prob:1})
             if val_loss < min_val_loss:
                 min_val_loss = val_loss
 
             print('epoch:', epoch, ' train_loss:', train_loss, ' val_loss:', val_loss)
 
-            nsml.report(summary = True, scope = locals(), epoch = epoch, total_epoch = config.epochs,
-                        train__loss = train_loss, val__loss = val_loss, min_val_loss = min_val_loss, step = epoch)
-
+            # nsml.report(summary = True, scope = locals(), epoch = epoch, epoch_total = config.epochs,
+            #             train__loss = train_loss, val__loss = val_loss, step = epoch)
+            nsml.report(summary=True, scope=locals(), epoch=epoch, epoch_total=config.epochs,
+                        train__loss=float(avg_loss/total_batch), step=epoch)
             # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)
 
@@ -338,4 +348,3 @@ if __name__ == '__main__':
             reviews = f.readlines()
         res = nsml.infer(reviews)
         print(res)
-

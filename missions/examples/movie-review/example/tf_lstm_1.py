@@ -28,7 +28,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
 import nsml
-from kor_char_parser_with_masking import get_voca_num
+from kor_char_parser_with_masking import get_voca_num, masking
 from dataset_split import MovieReviewDataset, preprocess
 from nsml import DATASET_PATH, HAS_DATASET, GPU_NUM, IS_ON_NSML
 
@@ -229,6 +229,7 @@ if __name__ == '__main__':
     output_size = 1
 
     dataset_train = MovieReviewDataset(DATASET_PATH, config.strmaxlen)
+    masking(dataset_train.x_test)
     vocab_size = get_voca_num()
 
     textRNN = TextRNN(config, vocab_size = vocab_size)
@@ -266,7 +267,12 @@ if __name__ == '__main__':
                     = sess.run([textRNN.loss_val, textRNN.predictions, textRNN.train_op],
                                feed_dict = {textRNN.input_y:labels, textRNN.input_x:data, textRNN.dropout_keep_prob:0.8})
 
-                print('Batch : ', i + 1, '/', total_batch, ', MSE in this minibatch: ', float(loss))
+                if i % 100 == 0:
+                    val_loss = sess.run(textRNN.loss_val,
+                                        feed_dict = {textRNN.input_y:y_test, textRNN.input_x:x_test,
+                                                     textRNN.dropout_keep_prob:1})
+                    print('Batch : ', i + 1, '/', total_batch, ', MSE in this minibatch: '
+                          , float(loss), 'val_loss : ', val_loss)
 
                 avg_loss += float(loss)
 
@@ -278,8 +284,8 @@ if __name__ == '__main__':
 
             print('epoch:', epoch, ' train_loss:', train_loss, ' val_loss:', val_loss)
 
-            nsml.report(summary = True, scope = locals(), epoch = epoch, total_epoch = config.epochs,
-                        train__loss = train_loss, val__loss = val_loss, min_val_loss = min_val_loss, step = epoch)
+            nsml.report(summary=True, scope=locals(), epoch=epoch, epoch_total=config.epochs,
+                        train__loss=float(avg_loss/total_batch), step=epoch)
 
             # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)

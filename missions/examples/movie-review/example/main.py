@@ -95,6 +95,8 @@ class Regression(nn.Module):
     """
     영화리뷰 예측을 위한 Regression 모델입니다.
     """
+
+
     def __init__(self, embedding_dim: int, max_length: int):
         """
         initializer

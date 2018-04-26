@@ -21,6 +21,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
 
+
 cho = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"  # len = 19
 jung = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"  # len = 21
 # len = 27
@@ -110,14 +111,25 @@ def decompose_str_as_one_hot(string, warning=True):
         x = string[i]
         if((x == 'm' and string[i + 1] == 'v') or (x == 'a' and string[i + 1] == 'c')):
             name = string[i:i+10]
-            if name not in mv_ac_dict.keys():
-                mv_ac_dict[name] = num_han + len(mv_ac_dict) + 1
-            tmp_list.append(mv_ac_dict[name])
-            i += 10
-            continue
+            if name in mv_ac_dict.keys():
+                tmp_list.append(mv_ac_dict[name])
+                i += 10
+                continue
         da = decompose_as_one_hot(ord(x), warning=warning)
         tmp_list.extend(da)
     return tmp_list
+
+def masking(text_list, warning=True):
+    for string in text_list:
+        for i in range(0, len(string)):
+            x = string[i]
+            if((x == 'm' and string[i + 1] == 'v') or (x == 'a' and string[i + 1] == 'c')):
+                name = string[i:i+10]
+                if name not in mv_ac_dict.keys():
+                    mv_ac_dict[name] = num_han + len(mv_ac_dict) + 1
+                i += 10
+                continue
+
 
 def get_voca_num():
     return num_han + len(mv_ac_dict)
