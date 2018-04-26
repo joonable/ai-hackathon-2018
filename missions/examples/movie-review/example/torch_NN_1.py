@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 
 """
@@ -34,6 +35,7 @@ from torch.nn import functional
 import nsml
 from dataset import MovieReviewDataset, preprocess
 from nsml import DATASET_PATH, HAS_DATASET, GPU_NUM, IS_ON_NSML
+from torch.nn import functional as F
 
 
 # DONOTCHANGE: They are reserved for nsml
@@ -53,7 +55,10 @@ def bind_model(model, config):
         print('Model loaded')
 
     def infer(raw_data, **kwargs):
+
+
         """
+
         :param raw_data: raw input (여기서는 문자열)을 입력받습니다
         :param kwargs:
         :return:
@@ -63,8 +68,9 @@ def bind_model(model, config):
         model.eval()
         # 저장한 모델에 입력값을 넣고 prediction 결과를 리턴받습니다
         output_prediction = model(preprocessed_data)
-
         point = output_prediction.data.squeeze(dim=1).tolist()
+
+
         # DONOTCHANGE: They are reserved for nsml
         # 리턴 결과는 [(confidence interval, 포인트)] 의 형태로 보내야만 리더보드에 올릴 수 있습니다. 리더보드 결과에 confidence interval의 값은 영향을 미치지 않습니다
         return list(zip(np.zeros(len(point)), point))
@@ -95,26 +101,34 @@ class Regression(nn.Module):
     """
     영화리뷰 예측을 위한 Regression 모델입니다.
     """
-    def __init__(self, embedding_dim: int, max_length: int):
+    def __init__(self, embedding_dim: int, max_length: int, training_state = False):
         """
         initializer
+
         :param embedding_dim: 데이터 임베딩의 크기입니다
         :param max_length: 인풋 벡터의 최대 길이입니다 (첫 번째 레이어의 노드 수에 연관)
         """
         super(Regression, self).__init__()
         self.embedding_dim = embedding_dim
         self.character_size = 251
-
         self.output_dim = 1  # Regression
         self.max_length = max_length
+        self.training_state = training_state
 
         # 임베딩
         self.embeddings = nn.Embedding(self.character_size, self.embedding_dim)
 
         # 첫 번째 레이어
-        self.fc1 = nn.Linear(self.max_length * self.embedding_dim, 200)
-        # 두 번째 (아웃풋) 레이어
-        self.fc2 = nn.Linear(200, 1)
+
+        self.fc1 = nn.Linear(self.max_length * self.embedding_dim, 500)
+        self.bat1 = nn.BatchNorm1d(500)
+        self.fc2 = nn.Linear(500, 300)
+        self.bat2 = nn.BatchNorm1d(300)
+        self.fc3 = nn.Linear(300, 100)
+        self.bat3 = nn.BatchNorm1d(100)
+        self.fc4 = nn.Linear(100, 20)
+        self.bat4 = nn.BatchNorm1d(20)
+        self.fc5 = nn.Linear(20, 1)
         # self.fc2 = nn.Linear(200, 1)
 
     def forward(self, data: list):
@@ -134,9 +148,16 @@ class Regression(nn.Module):
 
         # 뉴럴네트워크를 지나 결과를 출력합니다.
         embeds = self.embeddings(data_in_torch)
-        hidden = self.fc1(embeds.view(batch_size, -1))
-        # 영화 리뷰가 1~10점이기 때문에, 스케일을 맞춰줍니다
-        output = torch.sigmoid(self.fc2(hidden)) * 9 + 1
+        hidden1 = F.dropout(self.fc1(embeds.view(batch_size, -1)), training = training_state, p = 0.7)
+        hidden1 = F.relu(self.bat1(hidden1))
+        hidden2 = F.dropout(self.fc2(hidden1), training = training_state, p = 0.7)
+        hidden2 = F.relu(self.bat2(hidden2))
+        hidden3 = F.dropout(self.fc3(hidden2), training = training_state, p = 0.8)
+        hidden3 = F.relu(self.bat3(hidden3))
+        hidden4 = self.fc4(hidden3)
+        hidden4 = F.relu(self.bat4(hidden4))
+        output = torch.sigmoid(self.fc5(hidden4)) * 9 + 1
+
         return output
 
 
@@ -149,24 +170,29 @@ if __name__ == '__main__':
 
     # User options
     args.add_argument('--output', type=int, default=1)
-    args.add_argument('--epochs', type=int, default=10)
-    args.add_argument('--batch', type=int, default=2000)
+    args.add_argument('--epochs', type=int, default=30)
+    args.add_argument('--batch', type=int, default=50)
     args.add_argument('--strmaxlen', type=int, default=200)
     args.add_argument('--embedding', type=int, default=8)
     config = args.parse_args()
 
     if not HAS_DATASET and not IS_ON_NSML:  # It is not running on nsml
         DATASET_PATH = '../sample_data/movie_review/'
+    if config.mode == 'train':
+        training_state = True
+    else:
+        training_state = False
 
-    model = Regression(config.embedding, config.strmaxlen)
+    model = Regression(config.embedding, config.strmaxlen, training_state)
     if GPU_NUM:
+
         model = model.cuda()
 
     # DONOTCHANGE: Reserved for nsml use
     bind_model(model, config)
 
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.003)
 
     # DONOTCHANGE: They are reserved for nsml
     if config.pause:
@@ -182,7 +208,9 @@ if __name__ == '__main__':
                                   shuffle=True,
                                   collate_fn=collate_fn,
                                   num_workers=2)
+
         total_batch = len(train_loader)
+
         # epoch마다 학습을 수행합니다.
         for epoch in range(config.epochs):
             avg_loss = 0.0
@@ -206,8 +234,7 @@ if __name__ == '__main__':
             #
             nsml.report(summary=True, scope=locals(), epoch=epoch, epoch_total=config.epochs,
                         train__loss=float(avg_loss/total_batch), step=epoch)
-            # DONOTCHANGE (You can decide how often y
-            # ou want to save the model)
+            # DONOTCHANGE (You can decide how often you want to save the model)
             nsml.save(epoch)
 
     # 로컬 테스트 모드일때 사용합니다
